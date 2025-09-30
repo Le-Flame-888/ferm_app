@@ -40,39 +40,99 @@ class EquipementController extends Controller
      * Store a newly created resource in storage.
      */
     public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'code_ref' => 'required|string|max:255|unique:equipements,code_ref',
-            'categorie' => 'required|string|max:255',
-            'type_emplacement' => 'nullable|string|max:255',
-            'site' => 'required|string|max:255',
-            'emplacement' => 'required|string|max:255',
-            'lot' => 'required|string|max:50',
-            'description' => 'nullable|string',
-            'type_huile' => 'nullable|string|max:100',
-            'duree_controle' => 'nullable|integer|min:1',
-            'ref_courroie' => 'nullable|string|max:100',
-            'ref_roulement' => 'nullable|string|max:100',
-            'numero_serie' => 'nullable|string|max:100',
-            'marque' => 'nullable|string|max:100',
-            'date_achat' => 'nullable|date',
-            'date_mise_service' => 'nullable|date|after_or_equal:date_achat',
-            'prix_achat' => 'nullable|numeric|min:0',
-            'fournisseur_id' => 'nullable|exists:fournisseurs,id',
-            'photo' => 'nullable|image|max:2048',
-        ]);
+{
+    $validated = $request->validate([
+        'categorie' => 'required|string',
+        'type_emplacement' => 'required|string',
+        'site' => 'required|string',
+        'emplacement' => 'required|string',
+        'lot' => 'required|string',
+        'photo' => 'nullable|image|max:5120', // 5MB max
+        'description' => 'nullable|string',
+        'type_huile' => 'nullable|string',
+        'duree_controle' => 'nullable|integer',
+        'ref_courroie' => 'nullable|string',
+        'ref_roulement' => 'nullable|string',
+        'numero_serie' => 'nullable|string',
+        'marque' => 'nullable|string',
+        'date_achat' => 'nullable|date',
+        'fournisseur_id' => 'nullable|exists:fournisseurs,id',
+        'date_mise_service' => 'nullable|date',
+        'prix_achat' => 'nullable|numeric',
+    ]);
 
-        // Handle file upload
-        if ($request->hasFile('photo')) {
-            $path = $request->file('photo')->store('equipements', 'public');
-            $validated['photo'] = $path;
+    // Générer automatiquement le code_ref
+    $validated['code_ref'] = $this->genererCodeRef(
+        $validated['categorie'],
+        $validated['site'],
+        $validated['emplacement']
+    );
+
+    // Gérer l'upload de la photo
+    if ($request->hasFile('photo')) {
+        $validated['photo'] = $request->file('photo')->store('equipements', 'public');
+    }
+
+    $equipement = Equipement::create($validated);
+
+    return redirect()->route('equipements.index')
+        ->with('success', 'Équipement créé avec succès. Code: ' . $equipement->code_ref);
+}
+
+/**
+ * Générer un code de référence unique
+ * Format: {CATEGORIE_ABREGE}-{SITE_ABREGE}-{EMPLACEMENT_ABREGE}-{NUMERO}
+ */
+    private function genererCodeRef($categorie, $site, $emplacement)
+    {
+        // Abréviations de catégorie
+        $categorieMap = [
+            'Moteur' => 'MOT',
+            'Réducteur' => 'RED',
+            'Moteur Réducteur' => 'MOTRED',
+            'Moteur immergé' => 'MOTIMM',
+            'Pompe immergée' => 'POMPIMM',
+            'Pompe Fosse' => 'POMPFOS',
+            'Pompe Calpeda' => 'POMPCAL',
+        ];
+
+        // Abréviations de site
+        $siteMap = [
+            'Ain Aouda Ps' => 'AAP',
+            'Ain Aouda Pn' => 'AAN',
+            'Zhiliga' => 'ZHI',
+            'Khemisset' => 'KHE',
+        ];
+
+        // Abréviations d'emplacement
+        $emplacementMap = [
+            'Batiment' => 'BAT',
+            'Magasin' => 'MAG',
+            'Chateau' => 'CHA',
+            'Bassin' => 'BAS',
+            'Usine' => 'USI',
+        ];
+
+        $catAbrege = $categorieMap[$categorie] ?? strtoupper(substr($categorie, 0, 3));
+        $siteAbrege = $siteMap[$site] ?? strtoupper(substr($site, 0, 3));
+        $empAbrege = $emplacementMap[$emplacement] ?? strtoupper(substr($emplacement, 0, 3));
+
+        // Trouver le dernier numéro pour ce type de code
+        $prefix = "{$catAbrege}-{$siteAbrege}-{$empAbrege}";
+        $lastEquipement = Equipement::where('code_ref', 'LIKE', "{$prefix}-%")
+            ->orderBy('code_ref', 'desc')
+            ->first();
+
+        if ($lastEquipement) {
+            // Extraire le numéro du dernier code
+            $lastNumber = (int) substr($lastEquipement->code_ref, strrpos($lastEquipement->code_ref, '-') + 1);
+            $newNumber = $lastNumber + 1;
+        } else {
+            $newNumber = 1;
         }
 
-        $equipement = Equipement::create($validated);
-
-        return redirect()
-            ->route('equipements.show', $equipement->id)
-            ->with('success', 'Équipement créé avec succès.');
+        // Format: MOT-AAP-BAT-001
+        return sprintf("%s-%03d", $prefix, $newNumber);
     }
 
     /**
@@ -105,45 +165,49 @@ class EquipementController extends Controller
     public function update(Request $request, Equipement $equipement)
     {
         $validated = $request->validate([
-            'code_ref' => 'required|string|max:255|unique:equipements,code_ref,' . $equipement->id,
-            'categorie' => 'required|string|max:255',
-            'type_emplacement' => 'nullable|string|max:255',
-            'site' => 'required|string|max:255',
-            'emplacement' => 'required|string|max:255',
-            'lot' => 'required|string|max:50',
+            'categorie' => 'required|string',
+            'type_emplacement' => 'required|string',
+            'site' => 'required|string',
+            'emplacement' => 'required|string',
+            'lot' => 'required|string',
+            'photo' => 'nullable|image|max:5120',
             'description' => 'nullable|string',
-            'type_huile' => 'nullable|string|max:100',
-            'duree_controle' => 'nullable|integer|min:1',
-            'ref_courroie' => 'nullable|string|max:100',
-            'ref_roulement' => 'nullable|string|max:100',
-            'numero_serie' => 'nullable|string|max:100',
-            'marque' => 'nullable|string|max:100',
+            'type_huile' => 'nullable|string',
+            'duree_controle' => 'nullable|integer',
+            'ref_courroie' => 'nullable|string',
+            'ref_roulement' => 'nullable|string',
+            'numero_serie' => 'nullable|string',
+            'marque' => 'nullable|string',
             'date_achat' => 'nullable|date',
-            'date_mise_service' => 'nullable|date|after_or_equal:date_achat',
-            'prix_achat' => 'nullable|numeric|min:0',
             'fournisseur_id' => 'nullable|exists:fournisseurs,id',
-            'photo' => 'nullable|image|max:2048',
+            'date_mise_service' => 'nullable|date',
+            'prix_achat' => 'nullable|numeric',
         ]);
-
-        // Handle file upload
+    
+        // Si catégorie, site ou emplacement changent, régénérer le code_ref
+        if ($equipement->categorie !== $validated['categorie'] || 
+            $equipement->site !== $validated['site'] || 
+            $equipement->emplacement !== $validated['emplacement']) {
+            
+            $validated['code_ref'] = $this->genererCodeRef(
+                $validated['categorie'],
+                $validated['site'],
+                $validated['emplacement']
+            );
+        }
+    
+        // Gérer l'upload de la photo
         if ($request->hasFile('photo')) {
-            // Delete old photo if exists
+            // Supprimer l'ancienne photo si elle existe
             if ($equipement->photo) {
                 Storage::disk('public')->delete($equipement->photo);
             }
-            
-            $path = $request->file('photo')->store('equipements', 'public');
-            $validated['photo'] = $path;
-        } elseif ($request->has('remove_photo') && $equipement->photo) {
-            // Remove photo if the remove_photo checkbox is checked
-            Storage::disk('public')->delete($equipement->photo);
-            $validated['photo'] = null;
+            $validated['photo'] = $request->file('photo')->store('equipements', 'public');
         }
-
+    
         $equipement->update($validated);
-
-        return redirect()
-            ->route('equipements.show', $equipement->id)
+    
+        return redirect()->route('equipements.index')
             ->with('success', 'Équipement mis à jour avec succès.');
     }
 

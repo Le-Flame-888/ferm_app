@@ -11,12 +11,12 @@ class Equipement extends Model
 {
     use HasFactory;
     protected $fillable = [
+        'code_ref',
         'categorie',
         'type_emplacement',
         'site',
         'emplacement',
         'lot',
-        'code_ref',
         'photo',
         'description',
         'type_huile',
